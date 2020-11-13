@@ -26,3 +26,7 @@ Caused by: could not connect to database
 ## Usage
 
 See the [example](errors_test.go) for basic usage.
+
+## License
+
+The code is subject to the [MIT license](https://opensource.org/licenses/MIT).
