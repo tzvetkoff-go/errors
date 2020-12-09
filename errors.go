@@ -28,6 +28,10 @@ func Propagate(cause error, format string, args ...interface{}) error {
 
 // create ...
 func create(cause error, format string, args ...interface{}) error {
+	if cause == nil {
+		return nil
+	}
+
 	err := &Error{
 		Message: fmt.Sprintf(format, args...),
 		Cause:   cause,
