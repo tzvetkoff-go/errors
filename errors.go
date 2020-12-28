@@ -16,6 +16,17 @@ type Error struct {
 	Line     int
 }
 
+// Cause ...
+func Cause(err error) error {
+	if err, ok := err.(*Error); ok {
+		if err.Cause != nil {
+			return Cause(err.Cause)
+		}
+	}
+
+	return err
+}
+
 // New ...
 func New(format string, args ...interface{}) error {
 	return create(nil, format, args...)
@@ -23,15 +34,15 @@ func New(format string, args ...interface{}) error {
 
 // Propagate ...
 func Propagate(cause error, format string, args ...interface{}) error {
+	if cause == nil {
+		return nil
+	}
+
 	return create(cause, format, args...)
 }
 
 // create ...
 func create(cause error, format string, args ...interface{}) error {
-	if cause == nil {
-		return nil
-	}
-
 	err := &Error{
 		Message: fmt.Sprintf(format, args...),
 		Cause:   cause,
