@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// FormatTypes ...
+const (
+	FormatFull = iota
+	FormatBrief
+)
+
+// DefaultFormat ...
+var DefaultFormat = FormatFull
+
 // Error ...
 type Error struct {
 	Message  string
@@ -95,8 +104,10 @@ func (e *Error) Format(f fmt.State, c rune) {
 		text = formatFull(e)
 	} else if f.Flag('#') && !f.Flag('+') && c == 's' { // "%#s"
 		text = formatBrief(e)
-	} else {
+	} else if DefaultFormat == FormatFull {
 		text = formatFull(e)
+	} else {
+		text = formatBrief(e)
 	}
 
 	formatString := "%"
