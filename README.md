@@ -16,16 +16,16 @@ Especially when compared to this:
 
 ```
 could not create service
- --- at /home/w00t/Code/Go/errors/errors_test.go:12 (NewController) ---
+ --- at example_test.go:12 (NewController) ---
 Caused by: could not create repository
- --- at /home/w00t/Code/Go/errors/errors_test.go:18 (NewService) ---
+ --- at example_test.go:18 (NewService) ---
 Caused by: could not connect to database
- --- at /home/w00t/Code/Go/errors/errors_test.go:23 (NewRepository) ---
+ --- at example_test.go:23 (NewRepository) ---
 ```
 
 ## Usage
 
-See the [example](errors_test.go) for basic usage.
+See the [tests](errors_test.go) for basic usage.
 
 ## License
 

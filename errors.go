@@ -3,18 +3,42 @@ package errors
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 )
 
+// FormatType ...
+type FormatType int
+
 // FormatTypes ...
 const (
-	FormatFull = iota
-	FormatBrief
+	FormatFull FormatType = 1 << iota
+	FormatShort
 )
 
 // DefaultFormat ...
 var DefaultFormat = FormatFull
+
+// StripPath ...
+var StripPath = func(p string) string {
+	dirs := filepath.SplitList(os.Getenv("GOPATH"))
+	sort.SliceStable(dirs, func(i int, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+
+	for _, dir := range dirs {
+		src := filepath.Join(dir, "src") + string(os.PathSeparator)
+		if strings.HasPrefix(p, src+src) {
+			return p[len(src)+1:]
+		}
+	}
+
+	return p
+}
 
 // Error ...
 type Error struct {
@@ -23,6 +47,20 @@ type Error struct {
 	File     string
 	Function string
 	Line     int
+}
+
+// New ...
+func New(format string, args ...interface{}) error {
+	return Create(nil, format, args...)
+}
+
+// Propagate ...
+func Propagate(cause error, format string, args ...interface{}) error {
+	if cause == nil {
+		return nil
+	}
+
+	return Create(cause, format, args...)
 }
 
 // Cause ...
@@ -36,22 +74,8 @@ func Cause(err error) error {
 	return err
 }
 
-// New ...
-func New(format string, args ...interface{}) error {
-	return create(nil, format, args...)
-}
-
-// Propagate ...
-func Propagate(cause error, format string, args ...interface{}) error {
-	if cause == nil {
-		return nil
-	}
-
-	return create(cause, format, args...)
-}
-
-// create ...
-func create(cause error, format string, args ...interface{}) error {
+// Create ...
+func Create(cause error, format string, args ...interface{}) error {
 	err := &Error{
 		Message: fmt.Sprintf(format, args...),
 		Cause:   cause,
@@ -62,34 +86,97 @@ func create(cause error, format string, args ...interface{}) error {
 		return err
 	}
 
-	err.File = file
+	err.File = StripPath(file)
 	err.Line = line
 
 	fn := runtime.FuncForPC(pc)
 	if fn == nil {
 		return err
 	}
-	err.Function = shortFuncName(fn)
+
+	// - "github.com/palantir/shield/package.FuncName"
+	// - "github.com/palantir/shield/package.Receiver.MethodName"
+	// - "github.com/palantir/shield/package.(*PtrReceiver).MethodName"
+	funcName := fn.Name()
+	funcName = funcName[strings.LastIndex(funcName, "/")+1:]
+	funcName = funcName[strings.Index(funcName, ".")+1:]
+	funcName = strings.Replace(funcName, "(", "", 1)
+	funcName = strings.Replace(funcName, "*", "", 1)
+	funcName = strings.Replace(funcName, ")", "", 1)
+	err.Function = funcName
 
 	return err
 }
 
-// shortFuncName ...
-func shortFuncName(f *runtime.Func) string {
-	// - "github.com/palantir/shield/package.FuncName"
-	// - "github.com/palantir/shield/package.Receiver.MethodName"
-	// - "github.com/palantir/shield/package.(*PtrReceiver).MethodName"
-	longName := f.Name()
+// Unwrap ...
+func Unwrap(err error) error {
+	if err, ok := err.(*Error); ok {
+		if err.Cause != nil {
+			return err.Cause
+		}
+	}
 
-	withoutPath := longName[strings.LastIndex(longName, "/")+1:]
-	withoutPackage := withoutPath[strings.Index(withoutPath, ".")+1:]
+	if unwrappable, ok := err.(interface{ Unwrap() error }); ok {
+		return unwrappable.Unwrap()
+	}
 
-	shortName := withoutPackage
-	shortName = strings.Replace(shortName, "(", "", 1)
-	shortName = strings.Replace(shortName, "*", "", 1)
-	shortName = strings.Replace(shortName, ")", "", 1)
+	return nil
+}
 
-	return shortName
+// Is ...
+func Is(err, target error) bool {
+	if target == nil {
+		return err == nil
+	}
+
+	comparable := reflect.TypeOf(target).Comparable()
+	for {
+		if comparable && err == target {
+			return true
+		}
+
+		if x, ok := err.(interface{ Is(error) bool }); ok && x.Is(target) {
+			return true
+		}
+
+		if err = Unwrap(err); err == nil {
+			return false
+		}
+	}
+}
+
+// As ...
+func As(err error, target interface{}) bool {
+	if target == nil {
+		return false
+	}
+
+	val := reflect.ValueOf(target)
+	typ := val.Type()
+	if typ.Kind() != reflect.Ptr || val.IsNil() {
+		return false
+	}
+	targetType := typ.Elem()
+
+	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	if targetType.Kind() != reflect.Interface && !targetType.Implements(errorType) {
+		return false
+	}
+
+	for err != nil {
+		if reflect.TypeOf(err).AssignableTo(targetType) {
+			val.Elem().Set(reflect.ValueOf(err))
+			return true
+		}
+
+		if x, ok := err.(interface{ As(interface{}) bool }); ok && x.As(target) {
+			return true
+		}
+
+		err = Unwrap(err)
+	}
+
+	return false
 }
 
 // Error ...
@@ -103,11 +190,11 @@ func (e *Error) Format(f fmt.State, c rune) {
 	if f.Flag('+') && !f.Flag('#') && c == 's' { // "%+s"
 		text = formatFull(e)
 	} else if f.Flag('#') && !f.Flag('+') && c == 's' { // "%#s"
-		text = formatBrief(e)
+		text = formatShort(e)
 	} else if DefaultFormat == FormatFull {
 		text = formatFull(e)
 	} else {
-		text = formatBrief(e)
+		text = formatShort(e)
 	}
 
 	formatString := "%"
@@ -124,6 +211,7 @@ func (e *Error) Format(f fmt.State, c rune) {
 		formatString += fmt.Sprint(precision)
 	}
 	formatString += string(c)
+
 	fmt.Fprintf(f, formatString, text)
 }
 
@@ -164,8 +252,8 @@ func formatFull(e *Error) string {
 	return s
 }
 
-// formatBrief ...
-func formatBrief(e *Error) string {
+// formatShort ...
+func formatShort(e *Error) string {
 	s := ""
 
 	concat := func(msg string) {
